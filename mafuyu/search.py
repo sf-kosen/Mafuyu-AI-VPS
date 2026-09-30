@@ -1,9 +1,10 @@
 """web_search tool.
 
 Providers are tried in order and the first that answers wins:
-Tavily (TAVILY_API_KEY) -> Serper, i.e. Google results (SERPER_API_KEY) -> DuckDuckGo.
-DuckDuckGo needs no key, so search keeps working when a key is missing or its free
-quota runs out.
+Tavily (TAVILY_API_KEY) -> SearXNG, a self-hosted metasearch over Google/Bing/DDG
+(SEARXNG_URL) -> Serper, i.e. Google results (SERPER_API_KEY) -> DuckDuckGo.
+DuckDuckGo needs no key, so search keeps working when a key is missing, a free quota
+runs out, or the SearXNG instance is down.
 """
 
 import asyncio
@@ -54,9 +55,34 @@ WEB_SEARCH_TOOL = {
 
 
 class WebSearch:
-    def __init__(self, tavily_api_key: str | None, serper_api_key: str | None):
+    def __init__(
+        self,
+        tavily_api_key: str | None,
+        serper_api_key: str | None,
+        searxng_url: str | None = None,
+    ):
         self._tavily_key = tavily_api_key
         self._serper_key = serper_api_key
+        self._searxng_url = searxng_url.rstrip("/") if searxng_url else None
+
+    async def _searxng(self, query: str, topic: str, time_range: str | None) -> list[dict]:
+        params = {"q": query, "format": "json", "language": "ja", "categories": topic}
+        if time_range:
+            params["time_range"] = time_range
+        async with httpx.AsyncClient(timeout=TIMEOUT_SEC) as client:
+            resp = await client.get(f"{self._searxng_url}/search", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        results = data.get("results", [])
+        if not results and data.get("unresponsive_engines"):
+            # Every engine was blocked or timed out; let the next provider try.
+            raise RuntimeError(f"no engine answered: {data['unresponsive_engines']}")
+        rows = []
+        for r in results[:MAX_RESULTS]:
+            date = f"{r['publishedDate'][:10]} " if r.get("publishedDate") else ""
+            rows.append({"title": r.get("title", ""), "url": r.get("url", ""),
+                         "text": date + (r.get("content") or "")})
+        return rows
 
     async def _tavily(self, query: str, topic: str, time_range: str | None) -> list[dict]:
         body = {
@@ -135,6 +161,8 @@ class WebSearch:
         providers = []
         if self._tavily_key:
             providers.append(("Tavily", self._tavily))
+        if self._searxng_url:
+            providers.append(("SearXNG", self._searxng))
         if self._serper_key:
             providers.append(("Serper", self._serper))
         providers.append(("DuckDuckGo", self._ddg))

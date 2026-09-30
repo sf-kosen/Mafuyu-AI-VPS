@@ -1,0 +1,44 @@
+# Local-only SearXNG used by the Mafuyu bot's web_search tool.
+use_default_settings:
+  engines:
+    keep_only:
+      - google
+      - bing
+      - duckduckgo
+      - wikipedia
+      - google news
+      - bing news
+      - yahoo news
+
+general:
+  instance_name: "mafuyu-search"
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  default_lang: "ja"
+  formats:
+    - html
+    - json
+
+server:
+  port: 8888
+  bind_address: "127.0.0.1"
+  secret_key: "CHANGE_ME"  # openssl rand -hex 32
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+
+engines:
+  - name: bing
+    disabled: false
+  - name: google
+    disabled: false
+  - name: google news
+    disabled: false
+  - name: bing news
+    disabled: false

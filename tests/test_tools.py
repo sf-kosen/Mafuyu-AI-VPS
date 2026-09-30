@@ -118,6 +118,19 @@ class WebSearchTest(unittest.TestCase):
         self.assertIn("> 1. g", out)
         search._ddg.assert_not_called()
 
+    def test_searxng_before_serper(self):
+        search = WebSearch(None, "serper-key", "http://127.0.0.1:8888/")
+        search._searxng = AsyncMock(return_value=[{"title": "s", "url": "https://s.example", "text": "x"}])
+        search._serper = AsyncMock()
+        self.assertIn("> 1. s", asyncio.run(search.search("q")))
+        search._serper.assert_not_called()
+
+    def test_searxng_down_falls_through(self):
+        search = WebSearch(None, None, "http://127.0.0.1:8888")
+        search._searxng = AsyncMock(side_effect=RuntimeError("no engine answered"))
+        search._ddg = AsyncMock(return_value=[{"title": "d", "url": "https://d.example", "text": "y"}])
+        self.assertIn("> 1. d", asyncio.run(search.search("q")))
+
     def test_ddg_when_no_keys(self):
         search = WebSearch(None, None)
         search._ddg = AsyncMock(return_value=[])

@@ -18,7 +18,7 @@
   - `/forget` … 自分についての記憶を全部消す
 - **調べもの**：必要なときだけ道具を使う。
   - 天気は気象庁の予報（`get_weather`、市区町村名から地域を特定）
-  - ニュースや事実確認は Web 検索（`web_search`。Serper＝Google の結果、キーがなければ DuckDuckGo）
+  - ニュースや事実確認は Web 検索（`web_search`。VPS 内の SearXNG で Google・Bing・DuckDuckGo をまとめて検索。使えないときは Serper → DuckDuckGo）
   - 貼られた URL や検索結果のページは本文を読む（`read_url`）
 - **使いすぎ防止**：API 利用額を見積もり、1日・1か月の上限を超えたら返事をやめて 💤 リアクションだけ付ける。
 - **プロンプトインジェクション対策**：なりすまし・設定の聞き出し・記憶の汚染などに対する多層の対策（[後述](#セキュリティ)）。
@@ -119,7 +119,7 @@ mafuyu/
   budget.py    利用額の見積もりと上限
   safety.py    プロンプトインジェクション対策
   tools.py     モデルが使える道具の一覧
-  search.py    web_search（Tavily → Serper → DuckDuckGo の順に、キーがあるものを使う）
+  search.py    web_search（Tavily → SearXNG → Serper → DuckDuckGo の順に、設定があるものを使う）
   web.py       read_url（本文抽出と SSRF 対策）
   weather.py   get_weather（気象庁の予報 JSON）
   config.py    環境変数の読み込み
@@ -129,6 +129,7 @@ deploy/
   deploy.sh           VPS への反映スクリプト
   mafuyu.service      systemd ユニット
   .deploy.env.example 接続先のひな形
+  searxng/           SearXNG の導入スクリプト・設定・systemd ユニット
 tests/         unittest
 ```
 
@@ -159,7 +160,21 @@ sudo -u mafuyu python3 -m venv /opt/mafuyu/venv
 > （`AllowedIPs = 0.0.0.0/0`、`Endpoint` は WARP の IPv6 アドレス）。IPv6 と SSH は直接つながったままになる。
 > 設定は `/etc/wireguard/wgcf.conf`、`systemctl enable --now wg-quick@wgcf` で常時有効にする。
 
-### 4. デプロイする（手元の PC から）
+### 4. 検索エンジン SearXNG を入れる（任意・おすすめ）
+
+VPS の中だけで使う SearXNG を立てると、Google・Bing・DuckDuckGo の結果を無料・回数無制限でまとめて検索できる。
+
+```bash
+# リポジトリを VPS に置いた状態で（deploy.sh 後なら /opt/mafuyu/app/deploy/searxng）
+bash deploy/searxng/install.sh
+```
+
+- SearXNG は Python 3.11 以上が必要なので、`uv` で CPython 3.12 を `/opt/searxng` の中だけに入れる（システムの Python は変えない）。
+- `127.0.0.1:8888` でだけ待ち受け、外からはアクセスできない。メモリは 70MB ほど。
+- 使うエンジンは Google / Bing / DuckDuckGo / Wikipedia / Google News / Bing News / Yahoo News。Brave はすぐ利用制限がかかるので外している。
+- 入れたら `/opt/mafuyu/.env` に `SEARXNG_URL=http://127.0.0.1:8888` を書いて bot を再起動する。
+
+### 5. デプロイする（手元の PC から）
 
 ```bash
 cp deploy/.deploy.env.example deploy/.deploy.env   # 接続先と SSH 鍵を書く（git 管理外）
@@ -198,7 +213,8 @@ ssh <vps> 'sudo systemctl restart mafuyu'     # 再起動（.env を変えたあ
 | `USER_COOLDOWN_SEC` | `3` | 同じ人の連投を無視する秒数 |
 | `ENABLE_WEB_SEARCH` | `1` | 調べものの道具（検索・URL・天気）を使うか |
 | `SERPER_API_KEY` | 空 | Serper のキー（Google の検索結果。無料・カード不要で最初に 2,500 回）。空なら DuckDuckGo |
-| `TAVILY_API_KEY` | 空 | Tavily のキー（任意。Serper より先に使う） |
+| `TAVILY_API_KEY` | 空 | Tavily のキー（任意。いちばん先に使う） |
+| `SEARXNG_URL` | 空 | VPS 内の SearXNG の URL（本番は `http://127.0.0.1:8888`）。Serper より先に使う |
 | `DAILY_BUDGET_USD` | `0.1` | 1日の利用額の上限（0 で無制限） |
 | `MONTHLY_BUDGET_USD` | `2` | 1か月の利用額の上限（0 で無制限） |
 | `PRICE_INPUT_MISS` / `PRICE_INPUT_HIT` / `PRICE_OUTPUT` | `0.3` / `0.006` / `1.2` | 見積もりに使う単価（USD / 100万トークン、ピーク時） |

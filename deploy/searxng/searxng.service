@@ -1,0 +1,23 @@
+[Unit]
+Description=SearXNG (local metasearch for the Mafuyu bot)
+After=network-online.target wg-quick@wgcf.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=searxng
+Group=searxng
+WorkingDirectory=/opt/searxng/src
+Environment=SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+ExecStart=/opt/searxng/venv/bin/python -m searx.webapp
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/searxng
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

@@ -75,7 +75,8 @@ class MafuyuBot(discord.Client):
         self.memory = MemoryStore(db_path)
         self.system_prompt = (cfg.character_dir / "system_prompt.md").read_text(encoding="utf-8")
         self.tool_specs, self.tool_impls = (
-            build_tools(cfg.tavily_api_key, cfg.serper_api_key) if cfg.enable_web_search else ([], {})
+            build_tools(cfg.tavily_api_key, cfg.serper_api_key, cfg.searxng_url)
+            if cfg.enable_web_search else ([], {})
         )
         self.tree = app_commands.CommandTree(self)
         self._channel_locks: dict[int, asyncio.Lock] = {}

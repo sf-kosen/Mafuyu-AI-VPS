@@ -30,6 +30,7 @@ class Config:
     enable_web_search: bool
     tavily_api_key: str | None
     serper_api_key: str | None
+    searxng_url: str | None
     profile_update_every: int
     thinking: bool
     thinking_max_tokens: int
@@ -64,6 +65,7 @@ def load_config() -> Config:
         enable_web_search=_bool(os.getenv("ENABLE_WEB_SEARCH", "1")),
         tavily_api_key=os.getenv("TAVILY_API_KEY") or None,
         serper_api_key=os.getenv("SERPER_API_KEY") or None,
+        searxng_url=os.getenv("SEARXNG_URL") or None,
         profile_update_every=int(os.getenv("PROFILE_UPDATE_EVERY", "3")),
         thinking=_bool(os.getenv("THINKING", "0")),
         thinking_max_tokens=int(os.getenv("THINKING_MAX_TOKENS", "3000")),
