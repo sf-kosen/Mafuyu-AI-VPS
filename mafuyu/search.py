@@ -1,8 +1,9 @@
 """web_search tool.
 
-Uses Tavily (search API built for LLMs, returns the relevant passage of each page)
-when TAVILY_API_KEY is set, and falls back to DuckDuckGo when there is no key or
-Tavily fails (e.g. the free monthly credits ran out).
+Providers are tried in order and the first that answers wins:
+Tavily (TAVILY_API_KEY) -> Serper, i.e. Google results (SERPER_API_KEY) -> DuckDuckGo.
+DuckDuckGo needs no key, so search keeps working when a key is missing or its free
+quota runs out.
 """
 
 import asyncio
@@ -16,6 +17,8 @@ from mafuyu.safety import quote_block
 log = logging.getLogger(__name__)
 
 TAVILY_URL = "https://api.tavily.com/search"
+SERPER_URL = "https://google.serper.dev/search"
+SERPER_NEWS_URL = "https://google.serper.dev/news"
 TIMEOUT_SEC = 15
 MAX_RESULTS = 5
 SNIPPET_MAX_CHARS = 500
@@ -51,8 +54,9 @@ WEB_SEARCH_TOOL = {
 
 
 class WebSearch:
-    def __init__(self, tavily_api_key: str | None):
+    def __init__(self, tavily_api_key: str | None, serper_api_key: str | None):
         self._tavily_key = tavily_api_key
+        self._serper_key = serper_api_key
 
     async def _tavily(self, query: str, topic: str, time_range: str | None) -> list[dict]:
         body = {
@@ -76,6 +80,37 @@ class WebSearch:
             for r in data.get("results", [])
         ]
 
+    async def _serper(self, query: str, topic: str, time_range: str | None) -> list[dict]:
+        """Google results via Serper (serper.dev)."""
+        body = {"q": query, "gl": "jp", "hl": "ja", "num": MAX_RESULTS}
+        if time_range:
+            body["tbs"] = f"qdr:{time_range[0]}"  # d / w / m / y
+        url = SERPER_NEWS_URL if topic == "news" else SERPER_URL
+        async with httpx.AsyncClient(timeout=TIMEOUT_SEC) as client:
+            resp = await client.post(url, json=body, headers={"X-API-KEY": self._serper_key})
+            resp.raise_for_status()
+            return self.parse_serper(resp.json(), topic)
+
+    @staticmethod
+    def parse_serper(data: dict, topic: str) -> list[dict]:
+        rows = []
+        box = data.get("answerBox")
+        if box and (box.get("answer") or box.get("snippet")):
+            rows.append({"title": box.get("title") or "Googleの回答", "url": box.get("link", ""),
+                         "text": box.get("answer") or box.get("snippet", "")})
+        graph = data.get("knowledgeGraph")
+        if graph and graph.get("description"):
+            rows.append({"title": graph.get("title", ""), "url": graph.get("descriptionLink", ""),
+                         "text": graph["description"]})
+        for r in data.get("news" if topic == "news" else "organic", [])[:MAX_RESULTS]:
+            date = f"{r['date']} " if r.get("date") else ""
+            rows.append({"title": r.get("title", ""), "url": r.get("link", ""),
+                         "text": date + r.get("snippet", "")})
+        return rows
+
+    async def _ddg(self, query: str, topic: str, time_range: str | None) -> list[dict]:
+        return await asyncio.to_thread(self._ddg_sync, query, topic, time_range)
+
     @staticmethod
     def _ddg_sync(query: str, topic: str, time_range: str | None) -> list[dict]:
         timelimit = {"day": "d", "week": "w", "month": "m", "year": "y"}.get(time_range or "")
@@ -96,21 +131,23 @@ class WebSearch:
         if time_range not in (None, "day", "week", "month", "year"):
             time_range = None
 
-        results, source = None, ""
+        # Try providers in order of result quality; DuckDuckGo needs no key and is the last resort.
+        providers = []
         if self._tavily_key:
+            providers.append(("Tavily", self._tavily))
+        if self._serper_key:
+            providers.append(("Serper", self._serper))
+        providers.append(("DuckDuckGo", self._ddg))
+
+        results, source = None, ""
+        for source, provider in providers:
             try:
-                results, source = await self._tavily(query, topic, time_range), "Tavily"
+                results = await asyncio.wait_for(provider(query, topic, time_range), TIMEOUT_SEC)
+                break
             except Exception as e:
-                log.warning("tavily search failed for %r, falling back: %s", query, e)
+                log.warning("%s search failed for %r: %s", source, query, e)
         if results is None:
-            try:
-                results = await asyncio.wait_for(
-                    asyncio.to_thread(self._ddg_sync, query, topic, time_range), TIMEOUT_SEC
-                )
-                source = "DuckDuckGo"
-            except Exception as e:
-                log.warning("web_search failed for %r: %s", query, e)
-                return "検索に失敗しました。検索できなかったことを正直に伝えてください。"
+            return "検索に失敗しました。検索できなかったことを正直に伝えてください。"
         log.info("web_search via %s: %r (%d results)", source, query, len(results))
         if not results:
             return "検索結果はありませんでした。"

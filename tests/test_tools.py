@@ -1,7 +1,9 @@
 import asyncio
 import unittest
+from unittest.mock import AsyncMock
 
 from mafuyu.context import find_chinese
+from mafuyu.search import WebSearch
 from mafuyu.weather import format_forecast, resolve_place
 from mafuyu.web import BlockedURL, check_public_url
 
@@ -95,6 +97,32 @@ class CheckPublicUrlTest(unittest.TestCase):
         ]:
             with self.subTest(url=url), self.assertRaises(BlockedURL):
                 self.check(url)
+
+
+class WebSearchTest(unittest.TestCase):
+    def test_parse_serper(self):
+        data = {
+            "answerBox": {"title": "Python", "answer": "3.14", "link": "https://python.org"},
+            "organic": [{"title": "t1", "link": "https://a.example", "snippet": "s1", "date": "2日前"}],
+        }
+        rows = WebSearch.parse_serper(data, "general")
+        self.assertEqual(rows[0], {"title": "Python", "url": "https://python.org", "text": "3.14"})
+        self.assertEqual(rows[1], {"title": "t1", "url": "https://a.example", "text": "2日前 s1"})
+
+    def test_falls_back_in_order(self):
+        search = WebSearch("tavily-key", "serper-key")
+        search._tavily = AsyncMock(side_effect=RuntimeError("quota"))
+        search._serper = AsyncMock(return_value=[{"title": "g", "url": "https://g.example", "text": "hit"}])
+        search._ddg = AsyncMock()
+        out = asyncio.run(search.search("q"))
+        self.assertIn("> 1. g", out)
+        search._ddg.assert_not_called()
+
+    def test_ddg_when_no_keys(self):
+        search = WebSearch(None, None)
+        search._ddg = AsyncMock(return_value=[])
+        self.assertEqual(asyncio.run(search.search("q")), "検索結果はありませんでした。")
+        search._ddg.assert_awaited_once()
 
 
 class FindChineseTest(unittest.TestCase):

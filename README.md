@@ -18,7 +18,7 @@
   - `/forget` … 自分についての記憶を全部消す
 - **調べもの**：必要なときだけ道具を使う。
   - 天気は気象庁の予報（`get_weather`、市区町村名から地域を特定）
-  - ニュースや事実確認は Web 検索（`web_search`、Tavily。キーがなければ DuckDuckGo）
+  - ニュースや事実確認は Web 検索（`web_search`。Serper＝Google の結果、キーがなければ DuckDuckGo）
   - 貼られた URL や検索結果のページは本文を読む（`read_url`）
 - **使いすぎ防止**：API 利用額を見積もり、1日・1か月の上限を超えたら返事をやめて 💤 リアクションだけ付ける。
 - **プロンプトインジェクション対策**：なりすまし・設定の聞き出し・記憶の汚染などに対する多層の対策（[後述](#セキュリティ)）。
@@ -119,7 +119,7 @@ mafuyu/
   budget.py    利用額の見積もりと上限
   safety.py    プロンプトインジェクション対策
   tools.py     モデルが使える道具の一覧
-  search.py    web_search（Tavily → DuckDuckGo）
+  search.py    web_search（Tavily → Serper → DuckDuckGo の順に、キーがあるものを使う）
   web.py       read_url（本文抽出と SSRF 対策）
   weather.py   get_weather（気象庁の予報 JSON）
   config.py    環境変数の読み込み
@@ -197,7 +197,8 @@ ssh <vps> 'sudo systemctl restart mafuyu'     # 再起動（.env を変えたあ
 | `PROFILE_UPDATE_EVERY` | `3` | 何回会話したらプロファイルを更新するか |
 | `USER_COOLDOWN_SEC` | `3` | 同じ人の連投を無視する秒数 |
 | `ENABLE_WEB_SEARCH` | `1` | 調べものの道具（検索・URL・天気）を使うか |
-| `TAVILY_API_KEY` | 空 | Tavily のキー（無料・カード不要、月 1,000 回）。空なら DuckDuckGo |
+| `SERPER_API_KEY` | 空 | Serper のキー（Google の検索結果。無料・カード不要で最初に 2,500 回）。空なら DuckDuckGo |
+| `TAVILY_API_KEY` | 空 | Tavily のキー（任意。Serper より先に使う） |
 | `DAILY_BUDGET_USD` | `0.1` | 1日の利用額の上限（0 で無制限） |
 | `MONTHLY_BUDGET_USD` | `2` | 1か月の利用額の上限（0 で無制限） |
 | `PRICE_INPUT_MISS` / `PRICE_INPUT_HIT` / `PRICE_OUTPUT` | `0.3` / `0.006` / `1.2` | 見積もりに使う単価（USD / 100万トークン、ピーク時） |
