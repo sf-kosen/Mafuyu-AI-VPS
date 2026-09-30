@@ -1,0 +1,27 @@
+[Unit]
+Description=Mafuyu Discord bot
+After=network-online.target wg-quick@wgcf.service
+Wants=network-online.target wg-quick@wgcf.service
+
+[Service]
+Type=simple
+User=mafuyu
+Group=mafuyu
+WorkingDirectory=/opt/mafuyu/app
+ExecStart=/opt/mafuyu/venv/bin/python -m mafuyu
+EnvironmentFile=/opt/mafuyu/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=DATA_DIR=/opt/mafuyu/data
+Restart=on-failure
+RestartSec=10
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/mafuyu/data
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+.env
+data/
+__pycache__/
+*.pyc
+.venv/
+.claude/settings.local.json
+deploy/.deploy.env
