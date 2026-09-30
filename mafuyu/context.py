@@ -118,6 +118,19 @@ def clean_reply(text: str, self_names: tuple[str, ...] = ()) -> str:
     return _BRACKETED_NAME.sub(r"\1", "\n".join(lines)).strip()
 
 
+# Simplified-Chinese glyphs that don't appear in Japanese text, and Chinese words that
+# DeepSeek sometimes slips into Japanese replies (模型 = "model", 信息 = "information", ...).
+_SIMPLIFIED_ONLY = set("们这说吗么还为时过进样习问题网络关从发给让应该实现开场经线编码类设计语认识讯话请谢对个东车门长见觉边头视频软户质录帮呢啊")
+_CHINESE_WORDS = ("模型", "信息", "默认", "用户", "质量", "视频", "软件", "数据库", "服务器", "程序员")
+
+
+def find_chinese(text: str) -> list[str]:
+    """Return Chinese-only characters/words found in a (supposedly Japanese) reply."""
+    found = [w for w in _CHINESE_WORDS if w in text]
+    found += sorted({ch for ch in text if ch in _SIMPLIFIED_ONLY})
+    return found
+
+
 def split_message(text: str, limit: int = DISCORD_MAX_CHARS) -> list[str]:
     """Split text into Discord-sized chunks, preferring line breaks."""
     chunks = []

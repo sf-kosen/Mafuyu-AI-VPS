@@ -12,7 +12,7 @@ from mafuyu.safety import quote_block
 
 log = logging.getLogger(__name__)
 
-MAX_TOOL_ROUNDS = 2
+MAX_TOOL_ROUNDS = 3
 NO_THINKING = {"thinking": {"type": "disabled"}}
 WITH_THINKING = {"thinking": {"type": "enabled"}}
 

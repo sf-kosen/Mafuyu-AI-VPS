@@ -18,12 +18,13 @@ from mafuyu.context import (
     PastExchange,
     build_messages,
     clean_reply,
+    find_chinese,
     split_message,
 )
 from mafuyu.llm import LLM
 from mafuyu.memory import NOTES_MAX_CHARS, MemoryStore
 from mafuyu.safety import leaks_prompt, sanitize_profile
-from mafuyu.search import WEB_SEARCH_TOOL, web_search
+from mafuyu.tools import build_tools
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,10 @@ WEEKDAYS = "月火水木金土日"
 CHAT_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 ERROR_REPLY = "ごめん、今ちょっと頭が回ってないかも…もう一回話しかけて？"
 LEAK_REPLY = "んー、それはナイショかな"
+CHINESE_RETRY_NOTE = (
+    "注意: 直前の返事の案に中国語の単語が混ざっていた。中国語の語彙（模型・信息・视频など）を使わず、"
+    "自然な日本語（モデル・情報・動画など）だけで返事をし直すこと。"
+)
 # Reaction used instead of a reply once the spending cap (or the prepaid balance) is used up.
 SLEEP_REACTION = "💤"
 
@@ -69,6 +74,9 @@ class MafuyuBot(discord.Client):
         self.llm = LLM(cfg, self.budget)
         self.memory = MemoryStore(db_path)
         self.system_prompt = (cfg.character_dir / "system_prompt.md").read_text(encoding="utf-8")
+        self.tool_specs, self.tool_impls = (
+            build_tools(cfg.tavily_api_key) if cfg.enable_web_search else ([], {})
+        )
         self.tree = app_commands.CommandTree(self)
         self._channel_locks: dict[int, asyncio.Lock] = {}
         self._last_request: dict[int, float] = {}
@@ -200,12 +208,19 @@ class MafuyuBot(discord.Client):
                     self.system_prompt, history, trigger, notes, speaker_past, now_text
                 )
 
-                if self.cfg.enable_web_search:
-                    reply = await self.llm.reply(messages, [WEB_SEARCH_TOOL], {"web_search": web_search})
-                else:
-                    reply = await self.llm.reply(messages)
+                reply = await self.llm.reply(messages, self.tool_specs, self.tool_impls)
                 self_names = (message.guild.me.display_name, "真冬", "七瀬真冬", "まふゆ")
                 reply = clean_reply(reply, self_names) or "…？"
+                if find_chinese(reply) and not self.budget.exceeded():
+                    # DeepSeek occasionally slips in Chinese words (e.g. 模型 for "model"); ask once more.
+                    log.info("reply looked Chinese (%s); regenerating", find_chinese(reply))
+                    retry = await self.llm.reply(
+                        messages + [{"role": "system", "content": CHINESE_RETRY_NOTE}],
+                        self.tool_specs, self.tool_impls,
+                    )
+                    retry = clean_reply(retry, self_names)
+                    if retry and not find_chinese(retry):
+                        reply = retry
                 if leaks_prompt(reply, self.system_prompt, (TRIGGER_HEADER,)):
                     log.warning("reply leaked the character prompt; replaced (user=%s)", message.author.id)
                     reply = LEAK_REPLY

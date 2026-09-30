@@ -28,6 +28,7 @@ class Config:
     user_cooldown_sec: float
     allowed_guild_ids: frozenset[int]
     enable_web_search: bool
+    tavily_api_key: str | None
     profile_update_every: int
     thinking: bool
     thinking_max_tokens: int
@@ -60,6 +61,7 @@ def load_config() -> Config:
         user_cooldown_sec=float(os.getenv("USER_COOLDOWN_SEC", "3")),
         allowed_guild_ids=_int_set(os.getenv("ALLOWED_GUILD_IDS", "")),
         enable_web_search=_bool(os.getenv("ENABLE_WEB_SEARCH", "1")),
+        tavily_api_key=os.getenv("TAVILY_API_KEY") or None,
         profile_update_every=int(os.getenv("PROFILE_UPDATE_EVERY", "3")),
         thinking=_bool(os.getenv("THINKING", "0")),
         thinking_max_tokens=int(os.getenv("THINKING_MAX_TOKENS", "3000")),
