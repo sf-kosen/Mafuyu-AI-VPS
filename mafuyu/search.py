@@ -1,8 +1,8 @@
 """web_search tool.
 
 Providers are tried in order and the first that answers wins:
-Tavily (TAVILY_API_KEY) -> SearXNG, a self-hosted metasearch over Google/Bing/DDG
-(SEARXNG_URL) -> Serper, i.e. Google results (SERPER_API_KEY) -> DuckDuckGo.
+SearXNG, a self-hosted metasearch over Google/Bing/DDG (SEARXNG_URL) ->
+Serper, i.e. Google results (SERPER_API_KEY) -> DuckDuckGo.
 DuckDuckGo needs no key, so search keeps working when a key is missing, a free quota
 runs out, or the SearXNG instance is down.
 """
@@ -17,7 +17,6 @@ from mafuyu.safety import quote_block
 
 log = logging.getLogger(__name__)
 
-TAVILY_URL = "https://api.tavily.com/search"
 SERPER_URL = "https://google.serper.dev/search"
 SERPER_NEWS_URL = "https://google.serper.dev/news"
 TIMEOUT_SEC = 15
@@ -55,15 +54,9 @@ WEB_SEARCH_TOOL = {
 
 
 class WebSearch:
-    def __init__(
-        self,
-        tavily_api_key: str | None,
-        serper_api_key: str | None,
-        searxng_url: str | None = None,
-    ):
-        self._tavily_key = tavily_api_key
-        self._serper_key = serper_api_key
+    def __init__(self, searxng_url: str | None, serper_api_key: str | None):
         self._searxng_url = searxng_url.rstrip("/") if searxng_url else None
+        self._serper_key = serper_api_key
 
     async def _searxng(self, query: str, topic: str, time_range: str | None) -> list[dict]:
         params = {"q": query, "format": "json", "language": "ja", "categories": topic}
@@ -83,28 +76,6 @@ class WebSearch:
             rows.append({"title": r.get("title", ""), "url": r.get("url", ""),
                          "text": date + (r.get("content") or "")})
         return rows
-
-    async def _tavily(self, query: str, topic: str, time_range: str | None) -> list[dict]:
-        body = {
-            "query": query,
-            "search_depth": "basic",
-            "topic": topic,
-            "max_results": MAX_RESULTS,
-        }
-        if topic == "general":
-            body["country"] = "japan"
-        if time_range:
-            body["time_range"] = time_range
-        async with httpx.AsyncClient(timeout=TIMEOUT_SEC) as client:
-            resp = await client.post(
-                TAVILY_URL, json=body, headers={"Authorization": f"Bearer {self._tavily_key}"}
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        return [
-            {"title": r.get("title", ""), "url": r.get("url", ""), "text": r.get("content", "")}
-            for r in data.get("results", [])
-        ]
 
     async def _serper(self, query: str, topic: str, time_range: str | None) -> list[dict]:
         """Google results via Serper (serper.dev)."""
@@ -159,8 +130,6 @@ class WebSearch:
 
         # Try providers in order of result quality; DuckDuckGo needs no key and is the last resort.
         providers = []
-        if self._tavily_key:
-            providers.append(("Tavily", self._tavily))
         if self._searxng_url:
             providers.append(("SearXNG", self._searxng))
         if self._serper_key:

@@ -110,8 +110,8 @@ class WebSearchTest(unittest.TestCase):
         self.assertEqual(rows[1], {"title": "t1", "url": "https://a.example", "text": "2日前 s1"})
 
     def test_falls_back_in_order(self):
-        search = WebSearch("tavily-key", "serper-key")
-        search._tavily = AsyncMock(side_effect=RuntimeError("quota"))
+        search = WebSearch("http://127.0.0.1:8888", "serper-key")
+        search._searxng = AsyncMock(side_effect=RuntimeError("no engine answered"))
         search._serper = AsyncMock(return_value=[{"title": "g", "url": "https://g.example", "text": "hit"}])
         search._ddg = AsyncMock()
         out = asyncio.run(search.search("q"))
@@ -119,14 +119,14 @@ class WebSearchTest(unittest.TestCase):
         search._ddg.assert_not_called()
 
     def test_searxng_before_serper(self):
-        search = WebSearch(None, "serper-key", "http://127.0.0.1:8888/")
+        search = WebSearch("http://127.0.0.1:8888/", "serper-key")
         search._searxng = AsyncMock(return_value=[{"title": "s", "url": "https://s.example", "text": "x"}])
         search._serper = AsyncMock()
         self.assertIn("> 1. s", asyncio.run(search.search("q")))
         search._serper.assert_not_called()
 
     def test_searxng_down_falls_through(self):
-        search = WebSearch(None, None, "http://127.0.0.1:8888")
+        search = WebSearch("http://127.0.0.1:8888", None)
         search._searxng = AsyncMock(side_effect=RuntimeError("no engine answered"))
         search._ddg = AsyncMock(return_value=[{"title": "d", "url": "https://d.example", "text": "y"}])
         self.assertIn("> 1. d", asyncio.run(search.search("q")))

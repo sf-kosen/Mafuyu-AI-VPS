@@ -28,7 +28,6 @@ class Config:
     user_cooldown_sec: float
     allowed_guild_ids: frozenset[int]
     enable_web_search: bool
-    tavily_api_key: str | None
     serper_api_key: str | None
     searxng_url: str | None
     profile_update_every: int
@@ -63,7 +62,6 @@ def load_config() -> Config:
         user_cooldown_sec=float(os.getenv("USER_COOLDOWN_SEC", "3")),
         allowed_guild_ids=_int_set(os.getenv("ALLOWED_GUILD_IDS", "")),
         enable_web_search=_bool(os.getenv("ENABLE_WEB_SEARCH", "1")),
-        tavily_api_key=os.getenv("TAVILY_API_KEY") or None,
         serper_api_key=os.getenv("SERPER_API_KEY") or None,
         searxng_url=os.getenv("SEARXNG_URL") or None,
         profile_update_every=int(os.getenv("PROFILE_UPDATE_EVERY", "3")),

@@ -7,9 +7,9 @@ from mafuyu.web import READ_URL_TOOL, read_url
 
 
 def build_tools(
-    tavily_api_key: str | None, serper_api_key: str | None, searxng_url: str | None
+    searxng_url: str | None, serper_api_key: str | None
 ) -> tuple[list[dict], dict[str, ToolImpl]]:
-    search = WebSearch(tavily_api_key, serper_api_key, searxng_url)
+    search = WebSearch(searxng_url, serper_api_key)
     weather = WeatherClient()
     specs = [WEB_SEARCH_TOOL, READ_URL_TOOL, GET_WEATHER_TOOL]
     impls: dict[str, ToolImpl] = {

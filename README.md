@@ -119,7 +119,7 @@ mafuyu/
   budget.py    利用額の見積もりと上限
   safety.py    プロンプトインジェクション対策
   tools.py     モデルが使える道具の一覧
-  search.py    web_search（Tavily → SearXNG → Serper → DuckDuckGo の順に、設定があるものを使う）
+  search.py    web_search（SearXNG → Serper → DuckDuckGo の順に、設定があるものを使う）
   web.py       read_url（本文抽出と SSRF 対策）
   weather.py   get_weather（気象庁の予報 JSON）
   config.py    環境変数の読み込み
@@ -213,7 +213,6 @@ ssh <vps> 'sudo systemctl restart mafuyu'     # 再起動（.env を変えたあ
 | `USER_COOLDOWN_SEC` | `3` | 同じ人の連投を無視する秒数 |
 | `ENABLE_WEB_SEARCH` | `1` | 調べものの道具（検索・URL・天気）を使うか |
 | `SERPER_API_KEY` | 空 | Serper のキー（Google の検索結果。無料・カード不要で最初に 2,500 回）。空なら DuckDuckGo |
-| `TAVILY_API_KEY` | 空 | Tavily のキー（任意。いちばん先に使う） |
 | `SEARXNG_URL` | 空 | VPS 内の SearXNG の URL（本番は `http://127.0.0.1:8888`）。Serper より先に使う |
 | `DAILY_BUDGET_USD` | `0.1` | 1日の利用額の上限（0 で無制限） |
 | `MONTHLY_BUDGET_USD` | `2` | 1か月の利用額の上限（0 で無制限） |
