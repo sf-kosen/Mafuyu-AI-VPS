@@ -38,7 +38,9 @@ engines:
     disabled: false
   - name: google
     disabled: false
+    network: ipv6  # via WARP (IPv4) Google answers with CAPTCHAs; native IPv6 is not blocked
   - name: google news
     disabled: false
+    network: ipv6
   - name: bing news
     disabled: false

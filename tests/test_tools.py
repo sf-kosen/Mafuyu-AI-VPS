@@ -151,3 +151,21 @@ class FindChineseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CleanUrlTest(unittest.TestCase):
+    def test_strips_tracking(self):
+        from mafuyu.search import clean_url
+        self.assertEqual(clean_url("https://tabelog.com/a/?msockid=abc"), "https://tabelog.com/a/")
+        self.assertEqual(clean_url("https://x.jp/p?id=3&utm_source=t"), "https://x.jp/p?id=3")
+        self.assertEqual(clean_url("https://x.jp/p"), "https://x.jp/p")
+
+
+class ExtractTest(unittest.TestCase):
+    def test_listing_page_gets_headings(self):
+        from mafuyu.web import _extract
+        html = ("<html><body><h2>藤沢駅の海鮮のお店</h2><h3>殻YABURI 藤沢店</h3>"
+                "<h3>喜びの里</h3><h3>喜びの里</h3></body></html>").encode()
+        text = _extract(html, "text/html", None)
+        self.assertIn("- 殻YABURI 藤沢店", text)
+        self.assertEqual(text.split("【ページ内の見出し】")[1].count("喜びの里"), 1)

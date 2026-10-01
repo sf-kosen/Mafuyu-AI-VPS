@@ -22,6 +22,8 @@ TIMEOUT_SEC = 10
 MAX_BYTES = 1_500_000
 MAX_REDIRECTS = 3
 TEXT_MAX_CHARS = 4000
+SHORT_TEXT_CHARS = 1500
+MAX_HEADINGS = 60
 USER_AGENT = "Mozilla/5.0 (compatible; MafuyuBot/1.0; Discord character bot)"
 
 READ_URL_TOOL = {
@@ -66,10 +68,31 @@ async def check_public_url(url: str) -> None:
             raise BlockedURL("内部ネットワークのアドレスは読めません")
 
 
+def _headings(body: bytes) -> list[str]:
+    """Unique h2-h4 texts in page order; on listing pages (e.g. Tabelog) these are the shop names."""
+    # load_html detects the charset (lxml alone falls back to latin-1 without a meta tag).
+    doc = trafilatura.load_html(body)
+    if doc is None:
+        return []
+    seen, out = set(), []
+    for h in doc.xpath("//h2|//h3|//h4"):
+        text = " ".join(h.text_content().split())[:80]
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out[:MAX_HEADINGS]
+
+
 def _extract(body: bytes, content_type: str, encoding: str | None) -> str:
     if "html" in content_type:
         text = trafilatura.extract(body, include_comments=False, include_tables=True, favor_precision=True)
-        return text or ""
+        text = (text or "").strip()
+        # Article extraction misses list pages (ranking/search results), so add the headings.
+        if len(text) < SHORT_TEXT_CHARS:
+            headings = _headings(body)
+            if headings:
+                text += "\n\n【ページ内の見出し】\n" + "\n".join(f"- {h}" for h in headings)
+        return text
     return body.decode(encoding or "utf-8", errors="replace")
 
 
