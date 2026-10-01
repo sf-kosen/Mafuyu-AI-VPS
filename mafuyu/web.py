@@ -8,6 +8,7 @@ checked against private, loopback, link-local and other non-global ranges.
 import asyncio
 import ipaddress
 import logging
+import re
 import socket
 from urllib.parse import urljoin, urlsplit
 
@@ -24,6 +25,7 @@ MAX_REDIRECTS = 3
 TEXT_MAX_CHARS = 4000
 SHORT_TEXT_CHARS = 1500
 MAX_HEADINGS = 60
+_META_CHARSET = re.compile(rb"""<meta[^>]+charset=["']?([A-Za-z0-9_-]+)""", re.IGNORECASE)
 USER_AGENT = "Mozilla/5.0 (compatible; MafuyuBot/1.0; Discord character bot)"
 
 READ_URL_TOOL = {
@@ -47,6 +49,10 @@ class BlockedURL(Exception):
     pass
 
 
+class PageError(Exception):
+    """The page was reached but has nothing we can read; the message is shown to the model."""
+
+
 async def check_public_url(url: str) -> None:
     """Raise BlockedURL unless the URL is http(s) and every address it resolves to is global."""
     parts = urlsplit(url)
@@ -68,10 +74,9 @@ async def check_public_url(url: str) -> None:
             raise BlockedURL("内部ネットワークのアドレスは読めません")
 
 
-def _headings(body: bytes) -> list[str]:
+def _headings(html: str) -> list[str]:
     """Unique h2-h4 texts in page order; on listing pages (e.g. Tabelog) these are the shop names."""
-    # load_html detects the charset (lxml alone falls back to latin-1 without a meta tag).
-    doc = trafilatura.load_html(body)
+    doc = trafilatura.load_html(html)
     if doc is None:
         return []
     seen, out = set(), []
@@ -83,51 +88,77 @@ def _headings(body: bytes) -> list[str]:
     return out[:MAX_HEADINGS]
 
 
-def _extract(body: bytes, content_type: str, encoding: str | None) -> str:
+def _decode_html(body: bytes, charset: str | None) -> str:
+    """Decode with the declared charset (header, then <meta>); trafilatura's own guess
+    turned Shift_JIS pages such as kakakumag.com into mojibake."""
+    if not charset:
+        m = _META_CHARSET.search(body[:4096])
+        charset = m.group(1).decode("ascii") if m else "utf-8"
+    charset = charset.strip().lower()
+    if charset.replace("-", "_") in ("shift_jis", "sjis", "x_sjis", "windows_31j"):
+        charset = "cp932"  # superset used in practice
+    try:
+        return body.decode(charset, errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
+
+
+def _extract(body: bytes, content_type: str, charset: str | None) -> str:
     if "html" in content_type:
-        text = trafilatura.extract(body, include_comments=False, include_tables=True, favor_precision=True)
+        html = _decode_html(body, charset)
+        text = trafilatura.extract(html, include_comments=False, include_tables=True, favor_precision=True)
         text = (text or "").strip()
         # Article extraction misses list pages (ranking/search results), so add the headings.
         if len(text) < SHORT_TEXT_CHARS:
-            headings = _headings(body)
+            headings = _headings(html)
             if headings:
                 text += "\n\n【ページ内の見出し】\n" + "\n".join(f"- {h}" for h in headings)
         return text
-    return body.decode(encoding or "utf-8", errors="replace")
+    return body.decode(charset or "utf-8", errors="replace")
+
+
+async def fetch_page(url: str) -> tuple[str, str]:
+    """Fetch a public page and return (final URL, extracted text).
+
+    Raises BlockedURL for addresses we refuse to read, PageError for unreadable pages,
+    and httpx errors for network failures.
+    """
+    url = url.strip()
+    async with httpx.AsyncClient(
+        timeout=TIMEOUT_SEC, follow_redirects=False, headers={"User-Agent": USER_AGENT}
+    ) as client:
+        for _ in range(MAX_REDIRECTS + 1):
+            await check_public_url(url)
+            async with client.stream("GET", url) as resp:
+                if resp.is_redirect and "location" in resp.headers:
+                    url = urljoin(url, resp.headers["location"])
+                    continue
+                resp.raise_for_status()
+                ctype = resp.headers.get("content-type", "")
+                if not any(t in ctype for t in ("html", "text/plain", "json", "xml")):
+                    raise PageError(f"このURLはテキストのページではありません（{ctype or '種類不明'}）。")
+                body = bytearray()
+                async for chunk in resp.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > MAX_BYTES:
+                        break
+                # charset_encoding is only what the header declares (resp.encoding guesses utf-8).
+                text = await asyncio.to_thread(_extract, bytes(body), ctype, resp.charset_encoding)
+                return url, text.strip()
+    raise PageError("リダイレクトが多すぎて読めませんでした。")
 
 
 async def read_url(url: str) -> str:
-    url = url.strip()
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT_SEC, follow_redirects=False, headers={"User-Agent": USER_AGENT}
-        ) as client:
-            for _ in range(MAX_REDIRECTS + 1):
-                await check_public_url(url)
-                async with client.stream("GET", url) as resp:
-                    if resp.is_redirect and "location" in resp.headers:
-                        url = urljoin(url, resp.headers["location"])
-                        continue
-                    resp.raise_for_status()
-                    ctype = resp.headers.get("content-type", "")
-                    if not any(t in ctype for t in ("html", "text/plain", "json", "xml")):
-                        return f"このURLはテキストのページではありません（{ctype or '種類不明'}）。"
-                    body = bytearray()
-                    async for chunk in resp.aiter_bytes():
-                        body.extend(chunk)
-                        if len(body) > MAX_BYTES:
-                            break
-                    text = await asyncio.to_thread(_extract, bytes(body), ctype, resp.encoding)
-                    break
-            else:
-                return "リダイレクトが多すぎて読めませんでした。"
+        url, text = await fetch_page(url)
     except BlockedURL as e:
         return f"このURLは読めません: {e}"
+    except PageError as e:
+        return str(e)
     except Exception as e:
         log.warning("read_url failed for %r: %s", url, e)
         return "ページを読み込めませんでした。読めなかったことを正直に伝えてください。"
 
-    text = text.strip()
     if not text:
         return "ページから本文を取り出せませんでした。"
     if len(text) > TEXT_MAX_CHARS:

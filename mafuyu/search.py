@@ -138,10 +138,9 @@ class WebSearch:
         return [{"title": r.get("title", ""), "url": r.get("href", ""), "text": r.get("body", "")}
                 for r in rows]
 
-    async def search(self, query: str, topic: str = "general", time_range: str | None = None) -> str:
-        query = query.strip()[:200]
-        if not query:
-            return "検索キーワードが空です。"
+    async def results(self, query: str, topic: str = "general",
+                      time_range: str | None = None) -> list[dict] | None:
+        """Raw result rows from the first provider that answers, or None if all failed."""
         topic = topic if topic in ("general", "news") else "general"
         if time_range not in (None, "day", "week", "month", "year"):
             time_range = None
@@ -161,9 +160,17 @@ class WebSearch:
                 break
             except Exception as e:
                 log.warning("%s search failed for %r: %s", source, query, e)
+        if results is not None:
+            log.info("search via %s: %r (%d results)", source, query, len(results))
+        return results
+
+    async def search(self, query: str, topic: str = "general", time_range: str | None = None) -> str:
+        query = query.strip()[:200]
+        if not query:
+            return "検索キーワードが空です。"
+        results = await self.results(query, topic, time_range)
         if results is None:
             return "検索に失敗しました。検索できなかったことを正直に伝えてください。"
-        log.info("web_search via %s: %r (%d results)", source, query, len(results))
         if not results:
             return "検索結果はありませんでした。"
 

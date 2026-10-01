@@ -149,10 +149,6 @@ class FindChineseTest(unittest.TestCase):
                 self.assertEqual(find_chinese(text), [])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CleanUrlTest(unittest.TestCase):
     def test_strips_tracking(self):
         from mafuyu.search import clean_url
@@ -169,3 +165,62 @@ class ExtractTest(unittest.TestCase):
         text = _extract(html, "text/html", None)
         self.assertIn("- 殻YABURI 藤沢店", text)
         self.assertEqual(text.split("【ページ内の見出し】")[1].count("喜びの里"), 1)
+
+    def test_shift_jis_meta(self):
+        from mafuyu.web import _extract
+        html = '<html><head><meta charset="shift_jis"></head><body><h2>初心者におすすめ</h2></body></html>'
+        self.assertIn("初心者におすすめ", _extract(html.encode("cp932"), "text/html", None))
+
+
+class DeepSearchTest(unittest.TestCase):
+    def test_terms_skip_particles(self):
+        from mafuyu.deep import query_terms
+        terms = query_terms("藤沢の海鮮")
+        self.assertIn("海鮮", terms)
+        self.assertIn("藤沢", terms)
+        self.assertFalse(any(t == "のお" for t in query_terms("お店のおすすめ")))
+
+    def test_merge_interleaves_and_dedupes(self):
+        from mafuyu.deep import merge_results
+        a = [{"url": "https://a/1"}, {"url": "https://a/2"}]
+        b = [{"url": "https://a/1?msockid=x"}, {"url": "https://b/2"}]
+        self.assertEqual([r["url"] for r in merge_results([a, b])],
+                         ["https://a/1", "https://a/2", "https://b/2"])
+
+    def test_excerpt_prefers_relevant_and_skips_nav_headings(self):
+        from mafuyu.deep import pick_excerpt, query_terms
+        text = ("会社概要とアクセスのご案内です。ここは関係のない段落になります。\n"
+                "藤沢駅の海鮮居酒屋なら、しらす丼が人気の店が多いです。\n"
+                "【ページ内の見出し】\n- エリアから探す\n- 予算\n- 藤沢駅の海鮮のお店\n- 喜びの里\n- 殻YABURI 藤沢店")
+        out = pick_excerpt(text, query_terms("藤沢 海鮮 おすすめ"))
+        self.assertIn("見出し: 藤沢駅の海鮮のお店 / 喜びの里 / 殻YABURI 藤沢店", out)
+        self.assertIn("しらす丼", out)
+        self.assertNotIn("会社概要", out)
+        self.assertNotIn("エリアから探す", out)
+
+    def test_end_to_end_with_snippet_fallback(self):
+        from mafuyu import deep
+        search = WebSearch(None, None)
+        search.results = AsyncMock(side_effect=[
+            [{"title": "A", "url": "https://a.example/", "text": "snippet A"}],
+            [{"title": "B", "url": "https://b.example/", "text": "snippet B"}],
+        ])
+        pages = {"https://a.example/": "藤沢の海鮮のおすすめは喜びの里です。地元の人にも人気があります。" * 8,
+                 "https://b.example/": ""}
+        ds = deep.DeepSearch(search)
+        ds._read = AsyncMock(side_effect=lambda url: pages[url])
+        out = asyncio.run(ds.deep_search("藤沢の海鮮", ["藤沢 海鮮", "藤沢 海鮮 ランキング"]))
+        self.assertIn("【1】A（a.example）", out)
+        self.assertIn("喜びの里", out)
+        self.assertIn("（検索結果の抜粋）snippet B", out)
+
+    def test_all_searches_failed(self):
+        from mafuyu import deep
+        search = WebSearch(None, None)
+        search.results = AsyncMock(return_value=None)
+        out = asyncio.run(deep.DeepSearch(search).deep_search("q", ["q"]))
+        self.assertIn("検索に失敗しました", out)
+
+
+if __name__ == "__main__":
+    unittest.main()
