@@ -10,6 +10,7 @@ import ipaddress
 import logging
 import re
 import socket
+import threading
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -20,7 +21,7 @@ from mafuyu.safety import quote_block
 log = logging.getLogger(__name__)
 
 TIMEOUT_SEC = 10
-MAX_BYTES = 1_500_000
+MAX_BYTES = 1_000_000
 MAX_REDIRECTS = 3
 TEXT_MAX_CHARS = 4000
 SHORT_TEXT_CHARS = 1500
@@ -117,6 +118,17 @@ def _extract(body: bytes, content_type: str, charset: str | None) -> str:
     return body.decode(charset or "utf-8", errors="replace")
 
 
+# trafilatura parses with one module-level lxml HTMLParser, and lxml parsers are not
+# thread-safe: extracting several pages at once in to_thread crashed the process with
+# "double free or corruption". Extraction is CPU-bound under the GIL anyway.
+_EXTRACT_LOCK = threading.Lock()
+
+
+def _extract_locked(body: bytes, content_type: str, charset: str | None) -> str:
+    with _EXTRACT_LOCK:
+        return _extract(body, content_type, charset)
+
+
 async def fetch_page(url: str) -> tuple[str, str]:
     """Fetch a public page and return (final URL, extracted text).
 
@@ -143,7 +155,7 @@ async def fetch_page(url: str) -> tuple[str, str]:
                     if len(body) > MAX_BYTES:
                         break
                 # charset_encoding is only what the header declares (resp.encoding guesses utf-8).
-                text = await asyncio.to_thread(_extract, bytes(body), ctype, resp.charset_encoding)
+                text = await asyncio.to_thread(_extract_locked, bytes(body), ctype, resp.charset_encoding)
                 return url, text.strip()
     raise PageError("リダイレクトが多すぎて読めませんでした。")
 
