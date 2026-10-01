@@ -29,6 +29,7 @@ sudo mv /opt/mafuyu/app.new /opt/mafuyu/app
 sudo -u mafuyu /opt/mafuyu/venv/bin/pip install -q -r /opt/mafuyu/app/requirements.txt
 sudo install -m 644 /opt/mafuyu/app/deploy/mafuyu.service /etc/systemd/system/mafuyu.service
 sudo systemctl daemon-reload
+sudo bash /opt/mafuyu/app/deploy/network/install.sh
 if sudo test -s /opt/mafuyu/.env; then
   sudo systemctl enable mafuyu >/dev/null 2>&1
   sudo systemctl restart mafuyu

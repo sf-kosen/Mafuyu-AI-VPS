@@ -1,0 +1,7 @@
+[Unit]
+Description=Repair the WARP IPv4 tunnel for the Mafuyu bot
+After=wg-quick@wgcf.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mafuyu-netwatch
