@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from mafuyu.context import find_chinese
+from mafuyu.research import Research
 from mafuyu.search import WebSearch
 from mafuyu.weather import format_forecast, resolve_place
 from mafuyu.web import BlockedURL, check_public_url
@@ -114,27 +115,26 @@ class WebSearchTest(unittest.TestCase):
         search._searxng = AsyncMock(side_effect=RuntimeError("no engine answered"))
         search._serper = AsyncMock(return_value=[{"title": "g", "url": "https://g.example", "text": "hit"}])
         search._ddg = AsyncMock()
-        out = asyncio.run(search.search("q"))
-        self.assertIn("> 1. g", out)
+        self.assertEqual(asyncio.run(search.results("q"))[0]["title"], "g")
         search._ddg.assert_not_called()
 
     def test_searxng_before_serper(self):
         search = WebSearch("http://127.0.0.1:8888/", "serper-key")
         search._searxng = AsyncMock(return_value=[{"title": "s", "url": "https://s.example", "text": "x"}])
         search._serper = AsyncMock()
-        self.assertIn("> 1. s", asyncio.run(search.search("q")))
+        self.assertEqual(asyncio.run(search.results("q"))[0]["title"], "s")
         search._serper.assert_not_called()
 
     def test_searxng_down_falls_through(self):
         search = WebSearch("http://127.0.0.1:8888", None)
         search._searxng = AsyncMock(side_effect=RuntimeError("no engine answered"))
         search._ddg = AsyncMock(return_value=[{"title": "d", "url": "https://d.example", "text": "y"}])
-        self.assertIn("> 1. d", asyncio.run(search.search("q")))
+        self.assertEqual(asyncio.run(search.results("q"))[0]["title"], "d")
 
     def test_ddg_when_no_keys(self):
         search = WebSearch(None, None)
         search._ddg = AsyncMock(return_value=[])
-        self.assertEqual(asyncio.run(search.search("q")), "検索結果はありませんでした。")
+        self.assertEqual(asyncio.run(search.results("q")), [])
         search._ddg.assert_awaited_once()
 
 
@@ -172,23 +172,23 @@ class ExtractTest(unittest.TestCase):
         self.assertIn("初心者におすすめ", _extract(html.encode("cp932"), "text/html", None))
 
 
-class DeepSearchTest(unittest.TestCase):
+class ResearchTest(unittest.TestCase):
     def test_terms_skip_particles(self):
-        from mafuyu.deep import query_terms
+        from mafuyu.research import query_terms
         terms = query_terms("藤沢の海鮮")
         self.assertIn("海鮮", terms)
         self.assertIn("藤沢", terms)
         self.assertFalse(any(t == "のお" for t in query_terms("お店のおすすめ")))
 
     def test_merge_interleaves_and_dedupes(self):
-        from mafuyu.deep import merge_results
+        from mafuyu.research import merge_results
         a = [{"url": "https://a/1"}, {"url": "https://a/2"}]
         b = [{"url": "https://a/1?msockid=x"}, {"url": "https://b/2"}]
         self.assertEqual([r["url"] for r in merge_results([a, b])],
                          ["https://a/1", "https://a/2", "https://b/2"])
 
     def test_excerpt_prefers_relevant_and_skips_nav_headings(self):
-        from mafuyu.deep import pick_excerpt, query_terms
+        from mafuyu.research import pick_excerpt, query_terms
         text = ("会社概要とアクセスのご案内です。ここは関係のない段落になります。\n"
                 "藤沢駅の海鮮居酒屋なら、しらす丼が人気の店が多いです。\n"
                 "【ページ内の見出し】\n- エリアから探す\n- 予算\n- 藤沢駅の海鮮のお店\n- 喜びの里\n- 殻YABURI 藤沢店")
@@ -199,7 +199,6 @@ class DeepSearchTest(unittest.TestCase):
         self.assertNotIn("エリアから探す", out)
 
     def test_end_to_end_with_snippet_fallback(self):
-        from mafuyu import deep
         search = WebSearch(None, None)
         search.results = AsyncMock(side_effect=[
             [{"title": "A", "url": "https://a.example/", "text": "snippet A"}],
@@ -207,19 +206,25 @@ class DeepSearchTest(unittest.TestCase):
         ])
         pages = {"https://a.example/": "藤沢の海鮮のおすすめは喜びの里です。地元の人にも人気があります。" * 8,
                  "https://b.example/": ""}
-        ds = deep.DeepSearch(search)
-        ds._read = AsyncMock(side_effect=lambda url: pages[url])
-        out = asyncio.run(ds.deep_search("藤沢の海鮮", ["藤沢 海鮮", "藤沢 海鮮 ランキング"]))
+        rs = Research(search)
+        rs._read = AsyncMock(side_effect=lambda url: pages[url])
+        out = asyncio.run(rs.web_search("藤沢 海鮮", ["藤沢 海鮮 ランキング"]))
         self.assertIn("【1】A（a.example）", out)
         self.assertIn("喜びの里", out)
         self.assertIn("（検索結果の抜粋）snippet B", out)
 
     def test_all_searches_failed(self):
-        from mafuyu import deep
         search = WebSearch(None, None)
         search.results = AsyncMock(return_value=None)
-        out = asyncio.run(deep.DeepSearch(search).deep_search("q", ["q"]))
+        out = asyncio.run(Research(search).web_search("q"))
         self.assertIn("検索に失敗しました", out)
+
+    def test_single_query_and_duplicate_phrasings(self):
+        search = WebSearch(None, None)
+        search.results = AsyncMock(return_value=[])
+        out = asyncio.run(Research(search).web_search(" q ", ["q", ""]))
+        self.assertEqual(out, "検索結果はありませんでした。")
+        search.results.assert_awaited_once_with("q", "general", None)
 
 
 if __name__ == "__main__":
