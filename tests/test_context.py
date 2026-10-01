@@ -24,8 +24,7 @@ class BuildMessagesTest(unittest.TestCase):
         self.assertEqual([m["role"] for m in msgs], ["system", "user", "assistant", "user"])
         self.assertEqual(msgs[1]["content"], "[たろう] おはよ\n[はなこ] おはよー")
         self.assertEqual(
-            msgs[3]["content"],
-            f"[はなこ] 眠い\n\n{TRIGGER_HEADER}\n[kCat] 顔色#0000FFじゃない？\n（呼ぶなら「kCatさん」）",
+            msgs[3]["content"], f"[はなこ] 眠い\n\n{TRIGGER_HEADER}\n[kCat] 顔色#0000FFじゃない？"
         )
         self.assertTrue(msgs[0]["content"].startswith("SYSTEM"))
         self.assertIn("2026年10月01日", msgs[0]["content"])
@@ -34,7 +33,7 @@ class BuildMessagesTest(unittest.TestCase):
         history = [ChatLine(2, "a", "hi", False), ChatLine(1, "m", "yo", True)]
         msgs = build_messages("S", history, ChatLine(2, "a", "next", False), {}, [], "now")
         self.assertEqual([m["role"] for m in msgs], ["system", "user", "assistant", "user"])
-        self.assertEqual(msgs[3]["content"], f"{TRIGGER_HEADER}\n[a] next\n（呼ぶなら「aさん」）")
+        self.assertEqual(msgs[3]["content"], f"{TRIGGER_HEADER}\n[a] next")
 
     def test_notes_and_speaker_past(self):
         past = [PastExchange("9月30日 10:00", "ラーメン好き", "いいね")]
@@ -51,7 +50,7 @@ class BuildMessagesTest(unittest.TestCase):
     def test_empty_history_lines_skipped(self):
         history = [ChatLine(2, "a", "  ", False)]
         msgs = build_messages("S", history, ChatLine(2, "a", "hi", False), {}, [], "now")
-        self.assertEqual(msgs[1]["content"], f"{TRIGGER_HEADER}\n[a] hi\n（呼ぶなら「aさん」）")
+        self.assertEqual(msgs[1]["content"], f"{TRIGGER_HEADER}\n[a] hi")
 
 
 class CleanReplyTest(unittest.TestCase):
