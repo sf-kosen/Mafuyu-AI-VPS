@@ -86,6 +86,8 @@ def build_messages(
 
     trigger_text = (
         f"{TRIGGER_HEADER}\n[{speaker}] {neutralize(trigger.content.strip()[:LINE_MAX_CHARS])}"
+        # Spelled out because the transcript shows bare names, which the model then copied.
+        f"\n（呼ぶなら「{speaker}さん」）"
     )
     if messages[-1]["role"] == "user":
         messages[-1]["content"] += "\n\n" + trigger_text
