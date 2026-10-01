@@ -130,6 +130,7 @@ deploy/
   mafuyu.service      systemd ユニット
   .deploy.env.example 接続先のひな形
   searxng/           SearXNG の導入スクリプト・設定・systemd ユニット
+  network/           WARP が切れないようにする設定と見張りタイマー
 tests/         unittest
 ```
 
@@ -159,6 +160,11 @@ sudo -u mafuyu python3 -m venv /opt/mafuyu/venv
 > Cloudflare WARP を [wgcf](https://github.com/ViRb3/wgcf) で登録し、WireGuard で **IPv4 だけ** WARP に流す
 > （`AllowedIPs = 0.0.0.0/0`、`Endpoint` は WARP の IPv6 アドレス）。IPv6 と SSH は直接つながったままになる。
 > 設定は `/etc/wireguard/wgcf.conf`、`systemctl enable --now wg-quick@wgcf` で常時有効にする。
+>
+> `systemd-networkd` は再起動のたびに自分が作っていないルーティングルールを消すため、自動アップデートで
+> WARP のルールが消えて bot が止まることがある。`deploy.sh` が `deploy/network/install.sh` を実行し、
+> networkd がルールを消さない設定と、2 分ごとに IPv4 を確認して切れていれば WARP と bot を再起動する
+> `mafuyu-netwatch.timer` を入れる。ログは `journalctl -u mafuyu-netwatch` で見られる。
 
 ### 4. 検索エンジン SearXNG を入れる（任意・おすすめ）
 
