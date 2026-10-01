@@ -180,6 +180,23 @@ class ResearchTest(unittest.TestCase):
         self.assertIn("藤沢", terms)
         self.assertFalse(any(t == "のお" for t in query_terms("お店のおすすめ")))
 
+    def test_excerpt_keeps_title_with_its_paragraph(self):
+        from mafuyu.research import pick_excerpt, query_terms
+        text = ("ロマンシング サガ2 リベンジオブザセブン\n"
+                "七英雄と戦う王道RPGで、皇帝を代替わりさせながら進める独特のシステムが特徴です。\n"
+                "カルドセプト ビギンズ\n"
+                "Switch 2 Editionではおすそわけ通信に対応し、カードゲームの駆け引きを最大4人で楽しめるおすすめの一本です。")
+        out = pick_excerpt(text, query_terms("Switch2 おすすめ 4人"))
+        self.assertIn("カルドセプト ビギンズ\nSwitch 2 Editionでは", out)
+
+    def test_excerpt_marks_skipped_lines(self):
+        from mafuyu.research import pick_excerpt, query_terms
+        text = ("藤沢の海鮮丼が人気のお店について、地元の人の口コミをまとめました。ここから紹介します。\n"
+                + "関係のない長い段落がここに入ります。会社の沿革やアクセスの説明などが続きます。\n" * 3
+                + "藤沢駅の北口にある海鮮食堂は、新鮮な海鮮丼が手頃な値段で食べられると評判です。")
+        out = pick_excerpt(text, query_terms("藤沢 海鮮"))
+        self.assertIn("\n…\n", out)
+
     def test_merge_interleaves_and_dedupes(self):
         from mafuyu.research import merge_results
         a = [{"url": "https://a/1"}, {"url": "https://a/2"}]
