@@ -33,12 +33,16 @@ WEEKDAYS = "月火水木金土日"
 CHAT_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 ERROR_REPLY = "ごめん、今ちょっと頭が回ってないかも…もう一回話しかけて？"
 LEAK_REPLY = "んー、それはナイショかな"
+# Sent when the model returns no text even after the non-thinking fallback.
+TOO_HARD_REPLY = "うーん、ちょっと難しすぎて考えがまとまらなかった…ごめんね"
 CHINESE_RETRY_NOTE = (
     "注意: 直前の返事の案に中国語の単語が混ざっていた。中国語の語彙（模型・信息・视频など）を使わず、"
     "自然な日本語（モデル・情報・動画など）だけで返事をし直すこと。"
 )
 # Reaction used instead of a reply once the spending cap (or the prepaid balance) is used up.
 SLEEP_REACTION = "💤"
+# Reaction for a mention that arrives during the speaker's cooldown.
+COOLDOWN_REACTION = "⏳"
 
 
 def _jst_text(iso: str) -> str:
@@ -82,6 +86,7 @@ class MafuyuBot(discord.Client):
         self._channel_locks: dict[int, asyncio.Lock] = {}
         self._last_request: dict[int, float] = {}
         self._background: set[asyncio.Task] = set()
+        self._profile_updating: set[int] = set()
         self._register_commands()
 
     # ---- setup -------------------------------------------------------------
@@ -118,17 +123,17 @@ class MafuyuBot(discord.Client):
 
     # ---- triggering --------------------------------------------------------
 
-    async def _is_reply_to_me(self, message: discord.Message) -> bool:
+    async def _reply_target(self, message: discord.Message) -> discord.Message | None:
+        """The message this one replies to, fetched if it isn't cached."""
         ref = message.reference
         if not ref or not ref.message_id:
-            return False
-        target = ref.resolved
-        if not isinstance(target, discord.Message):
-            try:
-                target = await message.channel.fetch_message(ref.message_id)
-            except discord.HTTPException:
-                return False
-        return target.author.id == self.user.id
+            return None
+        if isinstance(ref.resolved, discord.Message):
+            return ref.resolved
+        try:
+            return await message.channel.fetch_message(ref.message_id)
+        except discord.HTTPException:
+            return None
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.guild is None:
@@ -138,21 +143,25 @@ class MafuyuBot(discord.Client):
         if message.type not in CHAT_MESSAGE_TYPES:
             return
         mentioned = self.user in message.mentions
-        if not mentioned and not await self._is_reply_to_me(message):
+        target = await self._reply_target(message)
+        if not mentioned and not (target and target.author.id == self.user.id):
             return
 
         now = time.monotonic()
         if now - self._last_request.get(message.author.id, 0) < self.cfg.user_cooldown_sec:
+            await self._react(message, COOLDOWN_REACTION)
             return
         self._last_request[message.author.id] = now
 
         lock = self._channel_locks.setdefault(message.channel.id, asyncio.Lock())
         async with lock:
-            await self._respond(message)
+            await self._respond(message, target)
 
     # ---- responding --------------------------------------------------------
 
-    async def _collect_lines(self, message: discord.Message) -> tuple[list[ChatLine], ChatLine]:
+    async def _collect_lines(
+        self, message: discord.Message, target: discord.Message | None
+    ) -> tuple[list[ChatLine], ChatLine]:
         """Return (channel history before the message, the message itself as the trigger)."""
         me = message.guild.me
         cutoff = datetime.now(timezone.utc) - timedelta(hours=self.cfg.history_max_age_hours)
@@ -171,31 +180,38 @@ class MafuyuBot(discord.Client):
 
         trigger_text = describe_message(message, me.display_name) or "（呼びかけ）"
         # Always say what the message replies to, so the model answers the right thread.
-        ref = message.reference
-        if ref and isinstance(ref.resolved, discord.Message):
-            target = ref.resolved
+        if target:
             quoted = describe_message(target, me.display_name)[:150]
             whose = "あなた" if target.author.id == me.id else target.author.display_name
             trigger_text = f"（{whose}の「{quoted}」への返信）{trigger_text}"
         trigger = ChatLine(message.author.id, message.author.display_name, trigger_text, False)
         return lines, trigger
 
-    async def _sleep(self, message: discord.Message) -> None:
+    async def _react(self, message: discord.Message, emoji: str) -> None:
         try:
-            await message.add_reaction(SLEEP_REACTION)
+            await message.add_reaction(emoji)
         except discord.HTTPException:
             pass
 
-    async def _respond(self, message: discord.Message) -> None:
+    async def _send_reply(self, message: discord.Message, text: str) -> None:
+        # Still post if the message was deleted while Mafuyu was thinking.
+        ref = message.to_reference(fail_if_not_exists=False)
+        for i, chunk in enumerate(split_message(text)):
+            if i == 0:
+                await message.channel.send(chunk, reference=ref)
+            else:
+                await message.channel.send(chunk)
+
+    async def _respond(self, message: discord.Message, target: discord.Message | None) -> None:
         if self.budget.exceeded():
             day, month = self.budget.spent()
             log.warning("budget exceeded (today=$%.4f month=$%.4f); not replying", day, month)
-            await self._sleep(message)
+            await self._react(message, SLEEP_REACTION)
             return
 
         async with message.channel.typing():
             try:
-                history, trigger = await self._collect_lines(message)
+                history, trigger = await self._collect_lines(message, target)
                 # Only the speaker's own profile: others' profiles could be coaxed out of the model.
                 notes = self.memory.get_notes([trigger.author_id])
                 speaker_past = [
@@ -209,40 +225,49 @@ class MafuyuBot(discord.Client):
                     self.system_prompt, history, trigger, notes, speaker_past, now_text
                 )
 
-                reply = await self.llm.reply(messages, self.tool_specs, self.tool_impls)
+                result = await self.llm.reply(messages, self.tool_specs, self.tool_impls)
+                if result.out_of_budget and not result.text:
+                    log.warning("budget ran out mid-reply; not replying")
+                    await self._react(message, SLEEP_REACTION)
+                    return
                 self_names = (message.guild.me.display_name, "真冬", "七瀬真冬", "まふゆ")
-                reply = clean_reply(reply, self_names) or "…？"
-                if find_chinese(reply) and not self.budget.exceeded():
-                    # DeepSeek occasionally slips in Chinese words (e.g. 模型 for "model"); ask once more.
+                reply = clean_reply(result.text, self_names)
+                gave_up = not reply
+                if gave_up:
+                    reply = TOO_HARD_REPLY
+                elif find_chinese(reply) and not self.budget.exceeded():
+                    # DeepSeek occasionally slips in Chinese words (e.g. 模型 for "model"); ask once
+                    # more, continuing from the same conversation so search results are reused.
                     log.info("reply looked Chinese (%s); regenerating", find_chinese(reply))
                     retry = await self.llm.reply(
-                        messages + [{"role": "system", "content": CHINESE_RETRY_NOTE}],
-                        self.tool_specs, self.tool_impls,
+                        result.messages + [
+                            {"role": "assistant", "content": reply},
+                            {"role": "system", "content": CHINESE_RETRY_NOTE},
+                        ],
+                        self.tool_specs, self.tool_impls, max_tool_rounds=0,
                     )
-                    retry = clean_reply(retry, self_names)
-                    if retry and not find_chinese(retry):
-                        reply = retry
+                    retry_text = clean_reply(retry.text, self_names)
+                    if retry_text and not find_chinese(retry_text):
+                        reply = retry_text
                 if leaks_prompt(reply, self.system_prompt, (TRIGGER_HEADER,)):
                     log.warning("reply leaked the character prompt; replaced (user=%s)", message.author.id)
                     reply = LEAK_REPLY
             except openai.APIStatusError as e:
                 if e.status_code == 402:
                     log.error("DeepSeek balance is exhausted (402)")
-                    await self._sleep(message)
+                    await self._react(message, SLEEP_REACTION)
                     return
                 log.exception("DeepSeek API error")
-                await message.reply(ERROR_REPLY)
+                await self._send_reply(message, ERROR_REPLY)
                 return
             except Exception:
                 log.exception("failed to generate reply")
-                await message.reply(ERROR_REPLY)
+                await self._send_reply(message, ERROR_REPLY)
                 return
 
-        for i, chunk in enumerate(split_message(reply)):
-            if i == 0:
-                await message.reply(chunk)
-            else:
-                await message.channel.send(chunk)
+        await self._send_reply(message, reply)
+        if gave_up:
+            return  # a canned apology says nothing about the user; keep it out of memory
 
         user_text = trigger.content
         since = self.memory.record_exchange(
@@ -251,7 +276,9 @@ class MafuyuBot(discord.Client):
         # Build a profile right after the first exchange, then refresh it every few exchanges.
         has_profile = bool(self.memory.get_notes([message.author.id]))
         due = since >= self.cfg.profile_update_every or not has_profile
-        if due and not self.budget.exceeded():
+        updating = message.author.id in self._profile_updating
+        if due and not updating and not self.budget.exceeded():
+            self._profile_updating.add(message.author.id)
             self._spawn(self._update_profile(message.author.id, message.author.display_name))
 
     def _spawn(self, coro) -> None:
@@ -270,3 +297,5 @@ class MafuyuBot(discord.Client):
             log.info("updated profile for %s (%d chars)", user_id, len(new_profile))
         except Exception:
             log.exception("failed to update profile for %s", user_id)
+        finally:
+            self._profile_updating.discard(user_id)

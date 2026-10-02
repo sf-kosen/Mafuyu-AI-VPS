@@ -3,6 +3,7 @@
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from openai import AsyncOpenAI
 
@@ -17,6 +18,16 @@ NO_THINKING = {"thinking": {"type": "disabled"}}
 WITH_THINKING = {"thinking": {"type": "enabled"}}
 
 ToolImpl = Callable[..., Awaitable[str]]
+
+
+@dataclass
+class Reply:
+    text: str
+    # The conversation the answer was written from, including any tool calls and results,
+    # so a follow-up request can continue from it without searching again.
+    messages: list[dict]
+    # True when the tool loop stopped early because the spending cap was reached.
+    out_of_budget: bool = False
 
 PROFILE_PROMPT = """\
 あなたはDiscordのキャラクターbot「真冬」の記憶係です。
@@ -84,25 +95,34 @@ class LLM:
         messages: list[dict],
         tools: list[dict] | None = None,
         tool_impls: dict[str, ToolImpl] | None = None,
-    ) -> str:
+        max_tool_rounds: int = MAX_TOOL_ROUNDS,
+    ) -> Reply:
         messages = list(messages)
         tool_impls = tool_impls or {}
-        for round_no in range(MAX_TOOL_ROUNDS + 1):
+        for round_no in range(max_tool_rounds + 1):
             if round_no > 0 and self._budget.exceeded():
-                break  # don't start another paid round once the cap is hit
+                # Don't start another paid round once the cap is hit.
+                return Reply("", messages, out_of_budget=True)
             kwargs = self._reply_params()
             if tools:
                 kwargs["tools"] = tools
                 # On the last round, force a text answer instead of another tool call.
-                if round_no == MAX_TOOL_ROUNDS:
+                if round_no == max_tool_rounds:
                     kwargs["tool_choice"] = "none"
             resp = await self._client.chat.completions.create(
                 model=self._cfg.model, messages=messages, **kwargs
             )
             self._log_usage("reply", resp.usage)
-            msg = resp.choices[0].message
+            choice = resp.choices[0]
+            msg = choice.message
             if not msg.tool_calls:
-                return (msg.content or "").strip()
+                text = (msg.content or "").strip()
+                if not text and choice.finish_reason == "length" and self._cfg.thinking:
+                    if self._budget.exceeded():
+                        return Reply("", messages, out_of_budget=True)
+                    log.warning("reply hit max_tokens while still reasoning; answering without thinking")
+                    text = await self._answer_without_thinking(messages, tools)
+                return Reply(text, messages)
 
             turn = msg.model_dump(exclude_none=True)
             # In thinking mode DeepSeek requires the reasoning to be sent back with tool calls.
@@ -119,7 +139,24 @@ class LLM:
                     result = f"ツールの引数が不正です: {e}"
                 log.info("tool %s(%s)", call.function.name, call.function.arguments)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
-        return ""
+        return Reply("", messages)
+
+    async def _answer_without_thinking(self, messages: list[dict], tools: list[dict] | None) -> str:
+        """One cheap non-thinking answer, used when the reasoning ate the whole token budget."""
+        # Reasoning from earlier tool rounds is only meaningful in thinking mode.
+        plain = [{k: v for k, v in m.items() if k != "reasoning_content"} for m in messages]
+        kwargs = {
+            "max_tokens": self._cfg.max_output_tokens,
+            "temperature": self._cfg.temperature,
+            "extra_body": NO_THINKING,
+        }
+        if tools:
+            kwargs.update(tools=tools, tool_choice="none")
+        resp = await self._client.chat.completions.create(
+            model=self._cfg.model, messages=plain, **kwargs
+        )
+        self._log_usage("reply-nothink", resp.usage)
+        return (resp.choices[0].message.content or "").strip()
 
     async def update_profile(
         self, name: str, profile: str, exchanges: list[tuple[str, str]], max_chars: int
