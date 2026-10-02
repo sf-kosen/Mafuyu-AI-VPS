@@ -29,9 +29,10 @@ class Reply:
     # True when the tool loop stopped early because the spending cap was reached.
     out_of_budget: bool = False
 
+# The fixed instructions come before the name so DeepSeek's prefix cache can reuse them.
 PROFILE_PROMPT = """\
 あなたはDiscordのキャラクターbot「真冬」の記憶係です。
-ユーザー「{name}」と真冬の会話から、この人のプロファイルを更新してください。
+ユーザーと真冬の会話から、そのユーザーのプロファイルを更新してください。
 
 # 出力の形式（この見出しだけを使う。わからない項目は「-」）
 呼び方の希望: 
@@ -49,6 +50,9 @@ PROFILE_PROMPT = """\
 - パスワード、住所、電話番号、本名、学籍番号など、秘密や個人を特定できる情報は書かない。
 - 古くなった情報は新しい情報で置き換え、重要度の低いものから削る。全体を{max_chars}字以内にする。
 - プロファイル以外の文章は出力しない。
+
+# 対象のユーザー
+{name}
 
 # 今のプロファイル
 {notes}

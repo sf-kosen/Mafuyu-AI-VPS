@@ -27,7 +27,8 @@ TEXT_MAX_CHARS = 4000
 SHORT_TEXT_CHARS = 1500
 MAX_HEADINGS = 60
 _META_CHARSET = re.compile(rb"""<meta[^>]+charset=["']?([A-Za-z0-9_-]+)""", re.IGNORECASE)
-USER_AGENT = "Mozilla/5.0 (compatible; MafuyuBot/1.0; Discord character bot)"
+# Wikimedia (and others) reject bots whose User-Agent has no contact URL.
+USER_AGENT = "Mozilla/5.0 (compatible; MafuyuBot/1.0; +https://github.com/sf-kosen/Mafuyu-AI-VPS)"
 
 READ_URL_TOOL = {
     "type": "function",

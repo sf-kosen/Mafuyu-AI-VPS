@@ -66,7 +66,7 @@ def load_config() -> Config:
         searxng_url=os.getenv("SEARXNG_URL") or None,
         profile_update_every=int(os.getenv("PROFILE_UPDATE_EVERY", "3")),
         thinking=_bool(os.getenv("THINKING", "0")),
-        thinking_max_tokens=int(os.getenv("THINKING_MAX_TOKENS", "3000")),
+        thinking_max_tokens=int(os.getenv("THINKING_MAX_TOKENS", "2000")),
         speaker_past_limit=int(os.getenv("SPEAKER_PAST_LIMIT", "3")),
         daily_budget_usd=float(os.getenv("DAILY_BUDGET_USD", "0.1")),
         monthly_budget_usd=float(os.getenv("MONTHLY_BUDGET_USD", "2")),

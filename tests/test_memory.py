@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mafuyu.memory import MemoryStore
+from mafuyu.memory import NOTES_MAX_CHARS, MemoryStore
 
 
 class MemoryStoreTest(unittest.TestCase):
@@ -33,6 +33,15 @@ class MemoryStoreTest(unittest.TestCase):
         self.store.record_exchange(2, "b", "other", "x")
         recent = self.store.recent_exchanges(1, 2)
         self.assertEqual([(u, b) for _, u, b in recent], [("u2", "b2"), ("u3", "b3")])
+
+    def test_long_notes_cut_at_line_break(self):
+        notes = "\n".join(f"項目{i}: " + "あ" * 90 for i in range(10))
+        self.store.record_exchange(1, "a", "u", "b")
+        self.store.set_notes(1, notes)
+        saved = self.store.get_notes([1])[1][1]
+        self.assertLessEqual(len(saved), NOTES_MAX_CHARS)
+        self.assertTrue(saved.endswith("あ"))
+        self.assertTrue(notes.startswith(saved))
 
     def test_forget(self):
         self.store.record_exchange(1, "a", "u", "b")

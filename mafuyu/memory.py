@@ -10,7 +10,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 NOTES_MAX_CHARS = 800
+# Length asked of the model; it often overshoots, so leave room below the hard cap.
+PROFILE_TARGET_CHARS = 650
 LOG_KEEP_PER_USER = 30
+
+
+def fit_notes(notes: str, limit: int = NOTES_MAX_CHARS) -> str:
+    """Cut an over-long profile at a line break, so no entry is left half-written."""
+    notes = notes.strip()
+    if len(notes) <= limit:
+        return notes
+    cut = notes.rfind("\n", 0, limit + 1)
+    return notes[:cut if cut > 0 else limit].rstrip()
 
 
 class MemoryStore:
@@ -109,7 +120,7 @@ class MemoryStore:
         with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE user_notes SET notes = ?, since_update = 0, updated_at = ? WHERE user_id = ?",
-                (notes.strip()[:NOTES_MAX_CHARS], self._now(), user_id),
+                (fit_notes(notes), self._now(), user_id),
             )
 
     def forget(self, user_id: int) -> None:

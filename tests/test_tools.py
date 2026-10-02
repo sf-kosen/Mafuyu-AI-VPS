@@ -204,6 +204,12 @@ class ResearchTest(unittest.TestCase):
         self.assertEqual([r["url"] for r in merge_results([a, b])],
                          ["https://a/1", "https://a/2", "https://b/2"])
 
+    def test_merge_drops_chinese_sites(self):
+        from mafuyu.research import merge_results
+        rows = [{"url": u} for u in ("https://zhuanlan.zhihu.com/p/1", "https://zh.wikipedia.org/x",
+                                     "https://example.cn/", "https://ja.wikipedia.org/wiki/y")]
+        self.assertEqual([r["url"] for r in merge_results([rows])], ["https://ja.wikipedia.org/wiki/y"])
+
     def test_excerpt_prefers_relevant_and_skips_nav_headings(self):
         from mafuyu.research import pick_excerpt, query_terms
         text = ("会社概要とアクセスのご案内です。ここは関係のない段落になります。\n"
@@ -228,7 +234,7 @@ class ResearchTest(unittest.TestCase):
         out = asyncio.run(rs.web_search("藤沢 海鮮", ["藤沢 海鮮 ランキング"]))
         self.assertIn("【1】A（a.example）", out)
         self.assertIn("喜びの里", out)
-        self.assertIn("（検索結果の抜粋）snippet B", out)
+        self.assertIn("（本文は読めなかった。検索結果の抜粋）snippet B", out)
 
     def test_all_searches_failed(self):
         search = WebSearch(None, None)

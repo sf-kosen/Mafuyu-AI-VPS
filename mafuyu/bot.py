@@ -13,6 +13,7 @@ from discord import app_commands
 from mafuyu.budget import Budget
 from mafuyu.config import Config
 from mafuyu.context import (
+    CONTEXT_HEADER,
     TRIGGER_HEADER,
     ChatLine,
     PastExchange,
@@ -20,9 +21,10 @@ from mafuyu.context import (
     clean_reply,
     find_chinese,
     split_message,
+    sticky_start,
 )
 from mafuyu.llm import LLM
-from mafuyu.memory import NOTES_MAX_CHARS, MemoryStore
+from mafuyu.memory import PROFILE_TARGET_CHARS, MemoryStore
 from mafuyu.safety import leaks_prompt, sanitize_profile
 from mafuyu.tools import build_tools
 
@@ -43,6 +45,8 @@ CHINESE_RETRY_NOTE = (
 SLEEP_REACTION = "💤"
 # Reaction for a mention that arrives during the speaker's cooldown.
 COOLDOWN_REACTION = "⏳"
+# Extra history fetched beyond HISTORY_LIMIT, so the window can stay put that many messages.
+HISTORY_SLACK = 10
 
 
 def _jst_text(iso: str) -> str:
@@ -85,6 +89,7 @@ class MafuyuBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self._channel_locks: dict[int, asyncio.Lock] = {}
         self._last_request: dict[int, float] = {}
+        self._history_start: dict[int, int] = {}  # channel id -> first message id in the window
         self._background: set[asyncio.Task] = set()
         self._profile_updating: set[int] = set()
         self._register_commands()
@@ -165,12 +170,22 @@ class MafuyuBot(discord.Client):
         """Return (channel history before the message, the message itself as the trigger)."""
         me = message.guild.me
         cutoff = datetime.now(timezone.utc) - timedelta(hours=self.cfg.history_max_age_hours)
+        fetch_limit = self.cfg.history_limit + HISTORY_SLACK
         history = [
             m
-            async for m in message.channel.history(limit=self.cfg.history_limit, before=message)
+            async for m in message.channel.history(limit=fetch_limit, before=message)
             if m.created_at >= cutoff and m.type in CHAT_MESSAGE_TYPES
         ]
         history.reverse()
+        # Keep the window's first message fixed for a while so the prompt prefix is cacheable.
+        start = sticky_start(
+            [m.id for m in history],
+            self._history_start.get(message.channel.id),
+            self.cfg.history_limit,
+        )
+        history = history[start:]
+        if history:
+            self._history_start[message.channel.id] = history[0].id
 
         lines = [
             ChatLine(m.author.id, m.author.display_name, describe_message(m, me.display_name),
@@ -249,7 +264,7 @@ class MafuyuBot(discord.Client):
                     retry_text = clean_reply(retry.text, self_names)
                     if retry_text and not find_chinese(retry_text):
                         reply = retry_text
-                if leaks_prompt(reply, self.system_prompt, (TRIGGER_HEADER,)):
+                if leaks_prompt(reply, self.system_prompt, (TRIGGER_HEADER, CONTEXT_HEADER)):
                     log.warning("reply leaked the character prompt; replaced (user=%s)", message.author.id)
                     reply = LEAK_REPLY
             except openai.APIStatusError as e:
@@ -291,7 +306,7 @@ class MafuyuBot(discord.Client):
             profile, exchanges = self.memory.pending_exchanges(user_id)
             if not exchanges:
                 return
-            new_profile = await self.llm.update_profile(name, profile, exchanges, NOTES_MAX_CHARS)
+            new_profile = await self.llm.update_profile(name, profile, exchanges, PROFILE_TARGET_CHARS)
             new_profile = sanitize_profile(new_profile)
             self.memory.set_notes(user_id, new_profile)
             log.info("updated profile for %s (%d chars)", user_id, len(new_profile))
