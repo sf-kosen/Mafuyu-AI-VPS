@@ -140,16 +140,25 @@ class MafuyuBot(discord.Client):
         except discord.HTTPException:
             return None
 
+    def _me(self, message: discord.Message) -> discord.abc.User:
+        """Mafuyu as seen where the message was sent (her member object in a server)."""
+        return message.guild.me if message.guild else self.user
+
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot or message.guild is None:
+        if message.author.bot:
             return
-        if not self._guild_allowed(message.guild.id):
+        is_dm = message.guild is None
+        if is_dm:
+            if message.author.id not in self.cfg.dm_user_ids:
+                return
+        elif not self._guild_allowed(message.guild.id):
             return
         if message.type not in CHAT_MESSAGE_TYPES:
             return
         mentioned = self.user in message.mentions
         target = await self._reply_target(message)
-        if not mentioned and not (target and target.author.id == self.user.id):
+        # In DMs every message is addressed to Mafuyu; in servers only mentions and replies are.
+        if not is_dm and not mentioned and not (target and target.author.id == self.user.id):
             return
 
         now = time.monotonic()
@@ -168,7 +177,7 @@ class MafuyuBot(discord.Client):
         self, message: discord.Message, target: discord.Message | None
     ) -> tuple[list[ChatLine], ChatLine]:
         """Return (channel history before the message, the message itself as the trigger)."""
-        me = message.guild.me
+        me = self._me(message)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=self.cfg.history_max_age_hours)
         fetch_limit = self.cfg.history_limit + HISTORY_SLACK
         history = [
@@ -245,7 +254,7 @@ class MafuyuBot(discord.Client):
                     log.warning("budget ran out mid-reply; not replying")
                     await self._react(message, SLEEP_REACTION)
                     return
-                self_names = (message.guild.me.display_name, "真冬", "七瀬真冬", "まふゆ")
+                self_names = (self._me(message).display_name, "真冬", "七瀬真冬", "まふゆ")
                 reply = clean_reply(result.text, self_names)
                 gave_up = not reply
                 if gave_up:

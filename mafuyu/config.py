@@ -27,6 +27,7 @@ class Config:
     history_max_age_hours: float
     user_cooldown_sec: float
     allowed_guild_ids: frozenset[int]
+    dm_user_ids: frozenset[int]
     enable_web_search: bool
     serper_api_key: str | None
     searxng_url: str | None
@@ -61,6 +62,7 @@ def load_config() -> Config:
         history_max_age_hours=float(os.getenv("HISTORY_MAX_AGE_HOURS", "12")),
         user_cooldown_sec=float(os.getenv("USER_COOLDOWN_SEC", "3")),
         allowed_guild_ids=_int_set(os.getenv("ALLOWED_GUILD_IDS", "")),
+        dm_user_ids=_int_set(os.getenv("DM_USER_IDS", "")),
         enable_web_search=_bool(os.getenv("ENABLE_WEB_SEARCH", "1")),
         serper_api_key=os.getenv("SERPER_API_KEY") or None,
         searxng_url=os.getenv("SEARXNG_URL") or None,
